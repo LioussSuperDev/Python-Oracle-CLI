@@ -56,3 +56,4 @@ data/
 secrets.json
 config.local.
 ORACLE_IDENTIFIER.json
+oracle_prompt/
