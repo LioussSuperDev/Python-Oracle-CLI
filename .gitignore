@@ -1,0 +1,58 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environnements virtuels
+venv/
+.env/
+.venv/
+env/
+ENV/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+.wheel/
+pip-wheel-metadata/
+
+# ===== Outils de dev =====
+# Pytest / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+coverage.xml
+
+# Lint / formatters
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+.pyre/
+.hypothesis/
+
+# ===== IDE / éditeurs =====
+# VS Code
+.vscode/
+.history/
+
+# PyCharm / IntelliJ
+.idea/
+
+# macOS
+.DS_Store
+
+# ===== Données locales (souvent à exclure) =====
+data/
+*.csv
+*.parquet
+*.log
+*.sqlite
+*.db
+
+# ===== Secrets / config locale =====
+.env*
+secrets.json
+config.local.
+ORACLE_IDENTIFIER.json
