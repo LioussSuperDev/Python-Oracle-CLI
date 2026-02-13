@@ -21,6 +21,14 @@ Le projet attend les fichiers suivants à côté du script principal :
 ## Installation
 
 ```bash
+pip install "liouss-python-oracle-cli @ git+https://github.com/LioussSuperDev/Python-Oracle-CLI.git@stable"
+```
+
+OU
+
+```bash
+git clone https://github.com/LioussSuperDev/Python-Oracle-CLI.git
+cd Python-Oracle-CLI
 pip install -e .
 ```
 
@@ -30,9 +38,7 @@ pip install -e .
 oracle
 ```
 
-Sur Linux :
-
-Pensez à ajouter au path "~/.local/bin/", ou executez :
+Sur Linux : pensez à ajouter au path "~/.local/bin/", ou executez :
 
 ```bash
 ~/.local/bin/oracle

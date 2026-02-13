@@ -26,21 +26,27 @@ def real_path(path_str: str) -> str:
 def generateConnection(connection_type, identifiers) -> Optional[SQLConnection]:
     return utils.generateConnection(connection_type, identifiers)
 
-def edit_in_editor(initial_text: str = "", suffix: str = ".txt", ignore_lines=0) -> str:
+def edit_in_editor(initial_text: str = "", ignore_lines=0, path=None) -> str:
     editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "nano"
-
-    with tempfile.NamedTemporaryFile(mode="w+", suffix=suffix, delete=False, encoding="utf-8") as f:
-        path = Path(f.name)
-        f.write(initial_text)
-        f.flush()
-
+    path_none = path is None
+    if path is None:
+        with tempfile.NamedTemporaryFile(mode="w+", suffix=".temp.txt", delete=False, encoding="utf-8") as f:
+            path = Path(f.name)
+            f.write(initial_text)
+            f.flush()
+    else:
+        with open(path, 'w+') as f:
+            path = Path(f.name)
+            f.write(initial_text)
+            f.flush()
     try:
         cmd = shlex.split(editor) + [str(path)]
         subprocess.run(cmd, check=False)
         return "\n".join(path.read_text(encoding="utf-8").splitlines()[ignore_lines:])
     finally:
         try:
-            path.unlink(missing_ok=True)
+            if path_none:
+                path.unlink(missing_ok=True)
         except Exception:
             pass
         
@@ -247,15 +253,36 @@ def main():
         os.path.dirname(os.path.abspath(__file__)),
         "ORACLE_IDENTIFIER.json"
     )
+    ORACLE_ID_LOCATION_EXMP = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "ORACLE_IDENTIFIER.example.json"
+    )
     CONFIG = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "config.json"
     )
-    with open(ORACLE_ID_LOCATION, "r") as f:
-        oracle_identifiers = json.load(f)
+    
+    no_identifiers = False
+    try:
+        with open(ORACLE_ID_LOCATION, "r") as f:
+            oracle_identifiers = json.load(f)
+    except Exception as e:
+        no_identifiers = True
+    while no_identifiers:
+        with open(ORACLE_ID_LOCATION_EXMP, "r") as f:
+            edit_in_editor(f.read(), path=ORACLE_ID_LOCATION)
+        try:
+            with open(ORACLE_ID_LOCATION, "r") as f:
+                oracle_identifiers = json.load(f)
+                no_identifiers = False
+        except Exception as e:
+            no_identifiers = True
+    
+        
     with open(CONFIG, "r") as f:
         output_folder = real_path(json.load(f)["output_directory"])
         os.makedirs(output_folder, exist_ok=True)
+        
     cli = None
     try:
         with ThreadPoolExecutor() as pool:
