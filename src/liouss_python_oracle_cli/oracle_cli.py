@@ -77,7 +77,7 @@ class OracleCmd(cmd.Cmd):
                         result = connection.query_one(query.strip("\n\r"), print_error=False, ignore_errors=False, include_col_name=True)
                     else:
                         result = connection.query_one(query.strip("\n\r"), placeholders, print_error=False, ignore_errors=False, include_col_name=True)
-                    beautiful_print(f"Query complete.")
+                    beautiful_print(f"Query complete.", log_only=True, log=log_file)
                 except Exception as e:
                     beautiful_print(f"Error executing query: {query}", log_only=True, log=log_file)
                     stack = "".join(traceback.format_exception(type(e), e, e.__traceback__))
