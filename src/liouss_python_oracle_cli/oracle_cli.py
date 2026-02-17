@@ -14,7 +14,8 @@ import csv
 import sqlparse
 from contextlib import nullcontext
 import shlex
-
+from prompt_toolkit import prompt
+from prompt_toolkit.history import InMemoryHistory
 
 def generateConnection(connection_type, identifiers) -> Optional[SQLConnection]:
     return utils.generateConnection(connection_type, identifiers)
@@ -42,6 +43,21 @@ class OracleCmd(cmd.Cmd):
         self.output_folder = output_folder
         self.pool = pool
         self.tasks = dict()
+        self._history = InMemoryHistory()
+
+    def cmdloop(self, intro=None):
+        if intro is not None:
+            print(intro)
+        stop = None
+        while not stop:
+            try:
+                line = prompt(self.prompt, history=self._history)
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            line = self.precmd(line)
+            stop = self.onecmd(line)
+            stop = self.postcmd(stop, line)
 
     def runscript_oracle(self, identifiers, script, task_id=None):
         queries = [s.strip() for s in sqlparse.split(script) if s.strip()]
@@ -191,7 +207,7 @@ class OracleCmd(cmd.Cmd):
         Usage: querys <SQL_QUERY>"""
         if arg.strip() == "":
             arg = edit_in_editor("Type your query on the line below", ignore_lines=1)
-        self.start_task(f"query {arg}", self.query_oracle, True, self.oracle_identifiers, arg, False)
+        self.start_task(f"querys {arg}", self.query_oracle, True, self.oracle_identifiers, arg, False)
     
     def do_queryc(self, arg):
         """Execute a SQL query on the Oracle database. Commits after execution
@@ -342,7 +358,7 @@ class OracleCmd(cmd.Cmd):
         
 def main():
     beautiful_print("~~~----~~~")
-    beautiful_print("Oracle CLI V0.1.1")
+    beautiful_print("Oracle CLI V0.1.2")
     beautiful_print("Author: Liouss")
     beautiful_print("~~~----~~~")
     
