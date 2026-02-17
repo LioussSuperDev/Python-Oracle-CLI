@@ -2,6 +2,8 @@ import json
 import os
 from typing import Optional
 from liouss_python_toolkit.printer import beautiful_print
+from liouss_python_toolkit.utility import edit_in_editor
+from liouss_python_toolkit.utility import real_path
 from liouss_python_sql_connectors.sql_connection import SQLConnection
 from liouss_python_sql_connectors import utils
 import cmd
@@ -11,47 +13,26 @@ import datetime
 import csv
 import sqlparse
 from contextlib import nullcontext
-from pathlib import Path
 import shlex
-import subprocess
-import tempfile
 
-def real_path(path_str: str) -> str:
-    return str(
-        Path(path_str.strip('"').strip("'"))
-        .expanduser()
-        .resolve(strict=False)
-    )
 
 def generateConnection(connection_type, identifiers) -> Optional[SQLConnection]:
     return utils.generateConnection(connection_type, identifiers)
 
-def edit_in_editor(initial_text: str = "", ignore_lines=0, path=None) -> str:
-    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "nano"
-    path_none = path is None
-    if path is None:
-        with tempfile.NamedTemporaryFile(mode="w+", suffix=".temp.txt", delete=False, encoding="utf-8") as f:
-            path = Path(f.name)
-            f.write(initial_text)
-            f.flush()
-    else:
-        with open(path, 'w+') as f:
-            path = Path(f.name)
-            f.write(initial_text)
-            f.flush()
-    try:
-        cmd = shlex.split(editor) + [str(path)]
-        subprocess.run(cmd, check=False)
-        return "\n".join(path.read_text(encoding="utf-8").splitlines()[ignore_lines:])
-    finally:
-        try:
-            if path_none:
-                path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        
+def get_oracle_connection_identifiers(connection:SQLConnection):
+    identifiers = connection.query_one("""
+        SELECT s.sid, s.serial#
+        FROM v$session s
+        WHERE s.audsid = SYS_CONTEXT('USERENV','SESSIONID')
+    """)
+    return identifiers[0] if identifiers else None
+    
+    
 class OracleCmd(cmd.Cmd):
     prompt = "Oracle Prompt> "
+    
+    def emptyline(self):
+        return
     
     def __init__(self, oracle_identifiers, connection:SQLConnection, connection_type, output_folder, pool, completekey = "tab", stdin = None, stdout = None) -> None:
         super().__init__(completekey, stdin, stdout)
@@ -65,9 +46,9 @@ class OracleCmd(cmd.Cmd):
     def runscript_oracle(self, identifiers, script, task_id=None):
         queries = [s.strip() for s in sqlparse.split(script) if s.strip()]
         for i, query in enumerate(queries):
-            self.query_oracle(identifiers, query.strip(";\n\r "), False, task_id=task_id, sub_task_id=i)
+            self.query_oracle(identifiers, query.strip(";\n\r "), False, task_id=task_id, sub_task_id=i, default_connection=self.connection)
     
-    def query_oracle(self, identifiers, query, commit, task_id=None, sub_task_id=0, default_connection=None):
+    def query_oracle(self, identifiers, query, commit, task_id=None, sub_task_id=0, default_connection=None, placeholders=None):
         
         if task_id is None:
             task_id = "NOT_A_TASK"
@@ -79,7 +60,12 @@ class OracleCmd(cmd.Cmd):
                 if connection is None:
                     return
             
-            with connection if not default_connection else nullcontext():                    
+            with connection if not default_connection else nullcontext():
+                
+                self.tasks[task_id]["connection"] = connection
+                if connection:
+                    self.tasks[task_id]["SID"],self.tasks[task_id]["SERIAL"] = get_oracle_connection_identifiers(connection) or ("NULL","NULL")
+                                   
                 os.makedirs(os.path.join(self.output_folder, "queries", str(task_id)), exist_ok=True)
                 output_file = os.path.join(self.output_folder, "queries", str(task_id), f"{sub_task_id}.output.csv")
                 log_file = os.path.join(self.output_folder, "queries", str(task_id), f"{sub_task_id}.log.txt")
@@ -87,7 +73,11 @@ class OracleCmd(cmd.Cmd):
                 beautiful_print(f"Executing query:\n{query}", log_only=True, log=log_file)
                 
                 try:
-                    result = connection.query_one(query.strip("; \n\r"), print_error=False, ignore_errors=False, include_col_name=True)
+                    if not placeholders:
+                        result = connection.query_one(query.strip("\n\r"), print_error=False, ignore_errors=False, include_col_name=True)
+                    else:
+                        result = connection.query_one(query.strip("\n\r"), placeholders, print_error=False, ignore_errors=False, include_col_name=True)
+                    beautiful_print(f"Query complete.")
                 except Exception as e:
                     beautiful_print(f"Error executing query: {query}", log_only=True, log=log_file)
                     stack = "".join(traceback.format_exception(type(e), e, e.__traceback__))
@@ -115,7 +105,12 @@ class OracleCmd(cmd.Cmd):
                 if connection is None:
                     return
             
-            with connection if not default_connection else nullcontext():                    
+            with connection if not default_connection else nullcontext():
+                
+                self.tasks[task_id]["connection"] = connection
+                if connection:
+                    self.tasks[task_id]["SID"],self.tasks[task_id]["SERIAL"] = get_oracle_connection_identifiers(connection) or ("NULL","NULL")
+                
                 os.makedirs(os.path.join(self.output_folder, "queries", str(task_id)), exist_ok=True)
                 log_file = os.path.join(self.output_folder, "queries", str(task_id), f"{sub_task_id}.log.txt")
                 
@@ -163,7 +158,7 @@ class OracleCmd(cmd.Cmd):
 
     def start_task(self, description, func, *args, **kwargs):
         task_id = f"async_{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-        self.tasks[task_id] = {"description": description, "process":self.pool.submit(func, *args, task_id=task_id, **kwargs)}
+        self.tasks[task_id] = {"description": description, "process":self.pool.submit(func, *args, task_id=task_id, **kwargs), "connection":None}
         beautiful_print(f"Started task {task_id}: {description}")
         return task_id
     
@@ -181,13 +176,14 @@ class OracleCmd(cmd.Cmd):
             arg = edit_in_editor("Type your query on the line below", ignore_lines=1)
         self.start_task(f"queryc {arg}", self.query_oracle, self.oracle_identifiers, arg, True)
         
-    def do_tasklst(self, arg):
+    def do_taskls(self, arg):
         """List all running tasks.
         Usage: tasklst [-i]"""
         for task_id, task_info in self.tasks.items():
-            status = "R" if not task_info["process"].done() else "C"
-            if arg != "-i" or status == "R":
-                beautiful_print(f"[{task_id}][{status}] : {task_info['description']}")
+            status = "Running" if not task_info["process"].done() else "Done"
+            if arg != "-i" or status == "Running":
+                sid,serial = self.tasks[task_id]["SID"],self.tasks[task_id]["SERIAL"]
+                beautiful_print(f"[{task_id}][{sid},{serial}]: ({status}) {task_info['description']}")
     
     def do_stoptsk(self, arg):
         """Stop a running task.
@@ -240,10 +236,63 @@ class OracleCmd(cmd.Cmd):
             if not self.tasks[task_id]["process"].done():
                 self.do_stoptsk(task_id)
         return True
-
+    
+    def do_savecmd(self, arg):
+        """Save a new user command or overwrites existing
+        Usage: savecmd <CMD_NAME>"""
+        
+        if arg.strip() == "":
+            beautiful_print("Please specify the command name")
+        
+        os.makedirs(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "commands"
+        ), exist_ok=True)   
+        path_to_save_command = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "commands",
+            f"{arg}.sql"
+        )
+        with open(path_to_save_command, "w+") as f:
+            f.write(edit_in_editor("Type your query on the line below", ignore_lines=1))
+        
+    def do_listcmd(self, arg):
+        """Lists existing user commands"""
+        os.makedirs(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "commands"
+        ), exist_ok=True)   
+        path_to_list_command = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "commands"
+        )
+        beautiful_print("List of existing commands:")
+        for s in os.listdir(path_to_list_command):
+            beautiful_print(s[:-4])
+            
+    def do_runcmd(self, arg):
+        """Runs a user command
+        USAGE: runcmd <CMD_NAME> [args...]"""
+        args = shlex.split(arg)
+        if not args:
+            beautiful_print("Please specify the command name")
+        
+        os.makedirs(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "commands"
+        ), exist_ok=True)   
+        path_to_load_command = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "commands",
+            f"{args[0]}.sql"
+        )
+        with open(path_to_load_command,"r") as f:
+            command = f.read()
+            self.start_task(f"cmd {arg}", self.query_oracle, self.oracle_identifiers, command, False, placeholders=tuple(args[1:]) if len(args) > 1 else None)
+            
 def main():
     beautiful_print("~~~----~~~")
-    beautiful_print("Oracle CLI V1.0")
+    beautiful_print("Oracle CLI V0.1.0")
     beautiful_print("Author: Liouss")
     beautiful_print("~~~----~~~")
     
