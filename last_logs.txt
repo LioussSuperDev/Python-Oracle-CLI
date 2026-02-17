@@ -1,0 +1,40 @@
+[2026-02-17 11:24:42.414664] Starting Loader at 2026-02-17 11:24:42.414498
+[2026-02-17 11:24:42.416103] Buffer size: 1000
+[2026-02-17 11:24:42.416964] Database: default; Fill optional columns: True
+[2026-02-17 11:24:42.417626] Test mode: None
+[2026-02-17 11:25:06.833944] <================================================================>
+[2026-02-17 11:25:06.835178] === Inserting dump 201902 (.tar.gz)
+[2026-02-17 14:35:45.862111] Error during loading: DPY-4011: the database or network closed the connection
+ORA-00028: your session has been killed
+Help: https://docs.oracle.com/error-help/db/ora-00028/
+[2026-02-17 14:35:45.863176] Stack trace:
+Traceback (most recent call last):
+  File "/home/jdiscala/phd_discala/CrossrefDumper/dumper/dump/loader.py", line 120, in load
+    self.relational_database.insert(to_insert, versioned_dump, first_insert, print_up=3)
+  File "/home/jdiscala/phd_discala/CrossrefDumper/dumper/database/relational_database.py", line 324, in insert
+    self.insert_or_update(articles, authors, references, first_insert=first_insert)
+  File "/home/jdiscala/phd_discala/CrossrefDumper/dumper/database/relational_database.py", line 303, in insert_or_update
+    self.insert_or_update_records(self.get_reference_table_name(), references, deletable_first_key="doi", deletable_other_key="reference")
+  File "/home/jdiscala/phd_discala/CrossrefDumper/dumper/database/relational_database.py", line 285, in insert_or_update_records
+    self.invalidate(table, to_invalidate, records[0].get_inserted_dump())
+  File "/home/jdiscala/phd_discala/CrossrefDumper/dumper/database/relational_database.py", line 253, in invalidate
+    self._invalidate(table, tuples, dump, keys[0])
+  File "/home/jdiscala/phd_discala/CrossrefDumper/dumper/database/oracle_database.py", line 150, in _invalidate
+    self.get_connection().query_many(
+  File "/home/jdiscala/.local/lib/python3.9/site-packages/liouss_python_sql_connectors/sql_connection.py", line 56, in query_many
+    raise e
+  File "/home/jdiscala/.local/lib/python3.9/site-packages/liouss_python_sql_connectors/sql_connection.py", line 50, in query_many
+    return self._query_many(request, *params, buffer_size=buffer_size, batch_error_lambda=batch_error_lambda, **params2)
+  File "/home/jdiscala/.local/lib/python3.9/site-packages/liouss_python_sql_connectors/oracle_connection.py", line 75, in _query_many
+    cur.executemany(query, *params, **params2, batcherrors=batch_error_lambda!=None)
+  File "/home/jdiscala/.local/lib/python3.9/site-packages/oracledb/cursor.py", line 774, in executemany
+    self._impl.executemany(
+  File "src/oracledb/impl/thin/cursor.pyx", line 317, in oracledb.thin_impl.ThinCursorImpl.executemany
+  File "src/oracledb/impl/thin/protocol.pyx", line 482, in oracledb.thin_impl.Protocol._process_single_message
+  File "src/oracledb/impl/thin/protocol.pyx", line 483, in oracledb.thin_impl.Protocol._process_single_message
+  File "src/oracledb/impl/thin/protocol.pyx", line 475, in oracledb.thin_impl.Protocol._process_message
+  File "src/oracledb/impl/thin/messages/base.pyx", line 102, in oracledb.thin_impl.Message._check_and_raise_exception
+oracledb.exceptions.DatabaseError: DPY-4011: the database or network closed the connection
+ORA-00028: your session has been killed
+Help: https://docs.oracle.com/error-help/db/ora-00028/
+[2026-02-17 14:35:45.887984] Process stopped!!!
