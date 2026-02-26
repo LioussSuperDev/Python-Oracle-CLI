@@ -60,3 +60,4 @@ oracle_prompt/
 commands/
 last_insert.json
 last_logs.txt
+config.json

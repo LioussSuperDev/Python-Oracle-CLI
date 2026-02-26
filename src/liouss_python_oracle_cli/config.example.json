@@ -1,0 +1,7 @@
+{
+    "workspaces": {
+        "default": {
+            "path": "~/oraclecli_default_workspace"
+        }
+    }
+}
