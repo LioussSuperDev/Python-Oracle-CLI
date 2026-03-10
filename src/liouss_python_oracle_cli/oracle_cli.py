@@ -589,7 +589,7 @@ class OracleCmd(cmd.Cmd):
         
 def main():
     beautiful_print("~~~----~~~")
-    beautiful_print("Oracle CLI V0.2.0")
+    beautiful_print("Oracle CLI V0.2.1")
     beautiful_print("Author: Liouss")
     beautiful_print("~~~----~~~")
     
