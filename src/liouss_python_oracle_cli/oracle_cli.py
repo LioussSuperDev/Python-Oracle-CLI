@@ -137,6 +137,8 @@ class OracleCmd(cmd.Cmd):
         else:
             connection = generateConnection(self.connection_type, identifiers)
             if connection is None:
+                beautiful_print("Unable to create a new connection", color=RED_COLOR)
+                self.tasks[task_id]["status"] = "Failed"
                 return
             
         with connection if not default_connection else nullcontext():
@@ -171,6 +173,7 @@ class OracleCmd(cmd.Cmd):
                         beautiful_print(f"Error executing query: {query}", log_only=(not sync), log=log_file, color=RED_COLOR)
                         stack = "".join(traceback.format_exception(type(e), e, e.__traceback__))
                         beautiful_print(stack, log_only=(not sync), log=log_file, color=RED_COLOR)
+                        self.tasks[task_id]["status"] = "Failed"
                         return
                         
                     with open(output_file, "w", newline="") as f:
@@ -193,9 +196,11 @@ class OracleCmd(cmd.Cmd):
                     beautiful_print(f"Error executing query: {task_id}/{sub_task_id}", log_only=(not sync), log=log_file, color=RED_COLOR)
                     stack = "".join(traceback.format_exception(type(e), e, e.__traceback__))
                     beautiful_print(stack, log_only=(not sync), log=log_file, color=RED_COLOR)
+                    self.tasks[task_id]["status"] = "Failed"
                     return
         if commit:
             connection.get_db().commit()
+        self.tasks[task_id]["status"] = "Success"
 
     def insert_many(self, identifiers, file_path, table_name, buffer_size, task_id=None, sub_task_id=0, default_connection=None):
         if task_id is None:
@@ -280,10 +285,10 @@ class OracleCmd(cmd.Cmd):
         """List all running tasks.
         Usage: taskls [-i]"""
         for task_id, task_info in self.tasks.items():
-            status = "Running" if task_info["process"] and (not task_info["process"].done()) else "Done"
-            color = GREEN_COLOR if status == "Done" else ORANGE_COLOR
+            status = "Running" if task_info["process"] and (not task_info["process"].done()) else "Failed" if self.tasks[task_id].get("status", None) == "Failed" else "Done"
+            color = GREEN_COLOR if status == "Done" else RED_COLOR if status == "Failed" else ORANGE_COLOR
             if arg != "-i" or status == "Running":
-                sid,serial = self.tasks[task_id]["SID"],self.tasks[task_id]["SERIAL"]
+                sid,serial = self.tasks[task_id].get("SID", "None"),self.tasks[task_id].get("SERIAL", "None")
                 beautiful_print(f"[{task_id}][{sid},{serial}]: ({status}) {task_info['description']}", color=color)
     
     def do_stoptsk(self, arg):
@@ -386,8 +391,8 @@ class OracleCmd(cmd.Cmd):
         
         
         beautiful_print("List of existing commands:")
-        beautiful_print(" ".join([s[:-4] for s in os.listdir(path_to_list_command)]))
-        beautiful_print(" ".join([s[:-4] for s in os.listdir(path_to_load_command_workspace)]))
+        beautiful_print(" ".join([s[:-4] for s in os.listdir(path_to_list_command)]), color=LIGHT_BLUE_COLOR)
+        beautiful_print(" ".join([s[:-4] for s in os.listdir(path_to_load_command_workspace)]), color=GREEN_COLOR)
         
     def do_runcmd(self, arg):
         """Runs a user command
@@ -622,17 +627,25 @@ def main():
     try:
         with ThreadPoolExecutor() as pool:
             connection = generateConnection(CONNECTION_TYPES, oracle_identifiers)
+
             if not connection:
+                beautiful_print("Unable to establish connection to database", color=RED_COLOR)
                 exit(1)
-                
-            with connection:
-                cli = OracleCmd(oracle_identifiers, connection, CONNECTION_TYPES, pool)
-                cli.switch_workspace(last_workspace)
-                cli.cmdloop()
+            
+            try:
+                beautiful_print("Opening connection to database...")
+                with connection:
+                    beautiful_print("Connection to database established",color=GREEN_COLOR)
+                    cli = OracleCmd(oracle_identifiers, connection, CONNECTION_TYPES, pool)
+                    cli.switch_workspace(last_workspace)
+                    cli.cmdloop()
+            except ConnectionError:
+                beautiful_print("Connection to database refused.", color=RED_COLOR)
+                exit(1)
             
     finally:
         if cli is not None:
             beautiful_print("Stopping all tasks and exiting")
             cli.do_exit("")
             
-        beautiful_print("Oracle prompter stopped")
+        beautiful_print("")
