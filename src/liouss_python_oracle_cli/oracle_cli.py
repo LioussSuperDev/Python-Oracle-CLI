@@ -55,13 +55,13 @@ def save_config(config:dict):
     with open(CONFIG_PATH, 'w') as f:
         json.dump(config, f, indent=2)
 
-class OracleCmd(cmd.Cmd):
+class SQLCMD(cmd.Cmd):
     prompt = "Oracle Prompt> "
     
     def emptyline(self):
         return
     
-    def __init__(self, oracle_identifiers, connection:SQLConnection, connection_type, pool, completekey = "tab", stdin = None, stdout = None) -> None:
+    def __init__(self, oracle_identifiers, connection:SQLConnection, connection_type, pool, database_name, completekey = "tab", stdin = None, stdout = None) -> None:
         super().__init__(completekey, stdin, stdout)
         self.oracle_identifiers = oracle_identifiers
         self.connection = connection
@@ -72,12 +72,13 @@ class OracleCmd(cmd.Cmd):
         self.workspace = DEFAULT_WORKSPACE
         self.workspace_config = {"path":DEFAULT_WORKSPACE_PATH}
         self.workspace_path = real_path(DEFAULT_WORKSPACE_PATH)
-        self.prompt = "Ora "
+        self.prompt = f"{database_name}"
         self.last_query = None
         self.last_query_content = None
         self.query_save_path = os.path.join(DEFAULT_WORKSPACE, "fav")
         self.last_submitted_content = None
         self.last_submitted_content_sync = None
+        self.database_name = database_name
         
     def switch_workspace(self, workspace_name:str):
         workspace_name = workspace_name.lower().strip(" \n\r\t")
@@ -91,7 +92,7 @@ class OracleCmd(cmd.Cmd):
         self.workspace_path = real_path(workspaces[workspace_name]["path"])
         self.workspace = workspace_name
         os.makedirs(self.workspace_path, exist_ok=True)
-        self.prompt = f"Ora:{self.workspace}> "
+        self.prompt = f"{self.connection_type}:{self.database_name}:{self.workspace}> "
         self.query_save_path = os.path.join(self.workspace_path, "fav")
         os.makedirs(self.query_save_path, exist_ok=True)
         
@@ -151,7 +152,7 @@ class OracleCmd(cmd.Cmd):
                 try:    
                     self.tasks[task_id]["connection"] = connection
                     if connection:
-                        self.tasks[task_id]["SID"],self.tasks[task_id]["SERIAL"] = get_oracle_connection_identifiers(connection) or ("NULL","NULL")
+                        self.tasks[task_id]["SID"],self.tasks[task_id]["SERIAL"] = self.connection_type == "oracle" and get_oracle_connection_identifiers(connection) or ("NULL","NULL")
                     
                     save_folder = self.get_query_save_folder_path(task_id)
                     os.makedirs(save_folder, exist_ok=True)
@@ -217,7 +218,7 @@ class OracleCmd(cmd.Cmd):
                 
                 self.tasks[task_id]["connection"] = connection
                 if connection:
-                    self.tasks[task_id]["SID"],self.tasks[task_id]["SERIAL"] = get_oracle_connection_identifiers(connection) or ("NULL","NULL")
+                    self.tasks[task_id]["SID"],self.tasks[task_id]["SERIAL"] = self.connection_type == "oracle" and get_oracle_connection_identifiers(connection) or ("NULL","NULL")
                 
                 save_folder = self.get_query_save_folder_path(task_id)
                 os.makedirs(save_folder, exist_ok=True)
@@ -231,7 +232,7 @@ class OracleCmd(cmd.Cmd):
                         header = next(reader)
 
                         cols = " , ".join(header)
-                        binds = " , ".join(f":{i}" for i in range(1, len(header) + 1))
+                        binds = " , ".join(f":{i}" for i in range(1, len(header) + 1)) if self.connection_type == "oracle" else  " , ".join(f"?" for i in range(1, len(header) + 1))
                         sql = f"INSERT INTO {table_name} ({cols}) VALUES ({binds})"
 
                         batch = []
@@ -588,55 +589,61 @@ class OracleCmd(cmd.Cmd):
         self.do_q(f"-a {to_exec}" if not self.last_submitted_content_sync else to_exec)
         
 def main():
-    beautiful_print("~~~----~~~")
-    beautiful_print("Oracle CLI V0.2.1")
-    beautiful_print("Author: Liouss")
-    beautiful_print("~~~----~~~")
-    
-    CONNECTION_TYPES = "oracle"
-    
-    ORACLE_ID_LOCATION = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "ORACLE_IDENTIFIER.json"
-    )
-    ORACLE_ID_LOCATION_EXMP = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "ORACLE_IDENTIFIER.example.json"
-    )
-    
-    no_identifiers = False
-    try:
-        with open(ORACLE_ID_LOCATION, "r") as f:
-            oracle_identifiers = json.load(f)
-    except Exception as e:
-        no_identifiers = True
-    while no_identifiers:
-        with open(ORACLE_ID_LOCATION_EXMP, "r") as f:
-            edit_in_editor(f.read(), path=ORACLE_ID_LOCATION)
-        try:
-            with open(ORACLE_ID_LOCATION, "r") as f:
-                oracle_identifiers = json.load(f)
-                no_identifiers = False
-        except Exception as e:
-            no_identifiers = True
     
     config = open_config()
     last_workspace = config.get("last_workspace", DEFAULT_WORKSPACE)
-    
     cli = None
     try:
         with ThreadPoolExecutor() as pool:
-            connection = generateConnection(CONNECTION_TYPES, oracle_identifiers)
+            
+            databases:dict = config.get("databases", dict())
+            beautiful_print("------------------------------------")
+            beautiful_print("Please choose one of the following databases")
+            beautiful_print("or add a new database to config.json")
+            beautiful_print("------------------------------------")
+            beautiful_print(", ".join([f"{k} ({databases[k]['type']})" for k in databases.keys()]))
+            beautiful_print("------------------------------------")
+            database_name = None
+            while not database_name:
+                inputed = input("database: ")
+                if not inputed in databases.keys():
+                    beautiful_print("invalid database name")
+                    continue
+                
+                if not "type" in databases.get(inputed,dict()) or not "path" in databases.get(inputed,dict()):
+                    beautiful_print("invalid config")
+                    continue
+                database_name = inputed
+            
+            t,p = databases.get(database_name, dict()).get("type", ""), real_path(databases.get(database_name, dict()).get("path", ""))
+            beautiful_print(f"Database {database_name} type={t} path={p}")
+            beautiful_print()
+            if t == "oracle":
+                with open(p,"r") as f:
+                    identifiers = json.load(f)
+            elif t == "sqlite":
+                identifiers = {"db_path":p}
+            else:
+                beautiful_print("Invalid database type")
+                exit(0)
+            
+            connection = generateConnection(t, identifiers)
 
             if not connection:
                 beautiful_print("Unable to establish connection to database", color=RED_COLOR)
                 exit(1)
             
+            beautiful_print("~~~----~~~")
+            beautiful_print("SQL CLI V0.2.2")
+            beautiful_print("Author: Liouss")
+            beautiful_print("~~~----~~~")
+            
+            
             try:
                 beautiful_print("Opening connection to database...")
                 with connection:
                     beautiful_print("Connection to database established",color=GREEN_COLOR)
-                    cli = OracleCmd(oracle_identifiers, connection, CONNECTION_TYPES, pool)
+                    cli = SQLCMD(identifiers, connection, t, pool, database_name)
                     cli.switch_workspace(last_workspace)
                     cli.cmdloop()
             except ConnectionError:

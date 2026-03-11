@@ -1,7 +1,14 @@
 {
-    "workspaces": {
-        "default": {
-            "path": "~/oraclecli_default_workspace"
-        }
+  "workspaces": {
+    "default": {
+      "path": "~/.sqlcli/workspaces/default"
     }
+  },
+  "last_workspace": "default",
+  "databases": {
+    "default_sqlite": {
+      "type": "sqlite",
+      "path": "~/.sqlcli/workspaces/default/default.db"
+    }
+  }
 }
