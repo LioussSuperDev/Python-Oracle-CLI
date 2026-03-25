@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from typing import Optional
 from liouss_python_toolkit.printer import beautiful_print, GREEN_COLOR, ORANGE_COLOR, RED_COLOR, LIGHT_BLUE_COLOR, RESET_COLOR
 from liouss_python_toolkit.utility import edit_in_editor
@@ -126,13 +127,13 @@ class SQLCMD(cmd.Cmd):
         connection = generateConnection(self.connection_type, identifiers)
         queries = [s.strip() for s in sqlparse.split(script) if s.strip()]
         with connection or nullcontext():
-            self.query_oracle(identifiers, [query.strip(";\n\r ") for query in queries], False, task_id=task_id, default_connection=connection)
+            self.query_oracle(identifiers, [query.strip(";\n\r ") for query in queries], task_id=task_id, default_connection=connection)
     
     def get_query_save_folder_path(self, taskid):
         today_str = datetime.date.today().strftime("%Y_%m_%d")
         return os.path.join(self.workspace_path, "queries", today_str, str(taskid))
     
-    def query_oracle(self, identifiers, queries:list[str], commit:bool, task_id=None, sync=False, default_connection=None, placeholders=None):
+    def query_oracle(self, identifiers, queries:list[str], task_id=None, sync=False, default_connection=None, placeholders=None):
         if default_connection is not None:
             connection = default_connection
         else:
@@ -141,67 +142,68 @@ class SQLCMD(cmd.Cmd):
                 beautiful_print("Unable to create a new connection", color=RED_COLOR)
                 self.tasks[task_id]["status"] = "Failed"
                 return
-            
-        with connection if not default_connection else nullcontext():
-            for sub_task_id, query in enumerate(queries):
-                query = query.strip("\n\r")
-                self.last_submitted_content = query
-                self.last_submitted_content_sync = sync
-                if task_id is None:
-                    task_id = "NOT_A_TASK"
-                try:    
-                    self.tasks[task_id]["connection"] = connection
-                    if connection:
+        
+        save_folder = self.get_query_save_folder_path(task_id)
+        os.makedirs(save_folder, exist_ok=True)
+        log_file = os.path.join(save_folder, f"log.txt")
+        try:
+            with connection if not default_connection else nullcontext():
+                for sub_task_id, query in enumerate(queries):
+                    query = query.strip("\n\r")
+                    self.last_submitted_content = query
+                    self.last_submitted_content_sync = sync
+                    if task_id is None:
+                        task_id = "NOT_A_TASK"
+                    try:    
+                        self.tasks[task_id]["connection"] = connection
                         self.tasks[task_id]["SID"],self.tasks[task_id]["SERIAL"] = self.connection_type == "oracle" and get_oracle_connection_identifiers(connection) or ("NULL","NULL")
-                    
-                    save_folder = self.get_query_save_folder_path(task_id)
-                    os.makedirs(save_folder, exist_ok=True)
-                    output_file = os.path.join(save_folder, f"{sub_task_id}.output.csv")
-                    sql_file = os.path.join(save_folder, f"query.sql")
-                    log_file = os.path.join(save_folder, f"{sub_task_id}.log.txt")
-                    
-                    try:
-                        if not placeholders:
-                            beautiful_print(f"Executing query:\n================\n{query}\n================", log_only=True, log=log_file)
-                            result = connection.query_one(query, print_error=False, ignore_errors=False, include_col_name=True)
-                        else:
-                            beautiful_print(f"Executing query:\n================\n{query}\n{placeholders}\n================", log_only=True, log=log_file)
-                            result = connection.query_one(query, placeholders, print_error=False, ignore_errors=False, include_col_name=True)
-                        beautiful_print(f"Query {sub_task_id} complete.", log_only=(not sync), log=log_file)
-                        self.last_query = save_folder
-                        self.last_query_content = query
+                        output_file = os.path.join(save_folder, f"{sub_task_id}.output.csv")
+                        sql_file = os.path.join(save_folder, f"query.sql")
+                        try:
+                            if not placeholders:
+                                beautiful_print(f"Executing query:\n================\n{query}\n================", log_only=True, log=log_file)
+                                result = connection.query_one(query, print_error=False, ignore_errors=False, include_col_name=True)
+                            else:
+                                beautiful_print(f"Executing query:\n================\n{query}\n{placeholders}\n================", log_only=True, log=log_file)
+                                result = connection.query_one(query, placeholders, print_error=False, ignore_errors=False, include_col_name=True)
+                            beautiful_print(f"Query {sub_task_id} complete.", log_only=(not sync), log=log_file)
+                            self.last_query = save_folder
+                            self.last_query_content = query
+                        except Exception as e:
+                            beautiful_print(f"Error executing query: {query}", log_only=(not sync), log=log_file, color=RED_COLOR)
+                            stack = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+                            beautiful_print(stack, log_only=(not sync), log=log_file, color=RED_COLOR)
+                            self.tasks[task_id]["status"] = "Failed"
+                            return
+                            
+                        with open(output_file, "w", newline="") as f:
+                            csv.writer(f).writerows(result or [])
+                        with open(sql_file, "w") as f:
+                            f.write(query)
+                        if sync:
+                            with open(output_file, "r",) as f:
+                                readlines = f.readlines(1000)
+                                if len(readlines) > 0:
+                                    beautiful_print("")
+                                    for line in readlines:
+                                        beautiful_print(line.strip(" \n\r\t"), color=LIGHT_BLUE_COLOR)
+                                    beautiful_print("")
+                                if f.read(1):
+                                    beautiful_print("...")
+                                    beautiful_print(f"Open file {output_file} to access complete result")
+                            
                     except Exception as e:
-                        beautiful_print(f"Error executing query: {query}", log_only=(not sync), log=log_file, color=RED_COLOR)
+                        beautiful_print(f"Error executing query: {task_id}/{sub_task_id}", log_only=(not sync), log=log_file, color=RED_COLOR)
                         stack = "".join(traceback.format_exception(type(e), e, e.__traceback__))
                         beautiful_print(stack, log_only=(not sync), log=log_file, color=RED_COLOR)
                         self.tasks[task_id]["status"] = "Failed"
                         return
-                        
-                    with open(output_file, "w", newline="") as f:
-                        csv.writer(f).writerows(result or [])
-                    with open(sql_file, "w") as f:
-                        f.write(query)
-                    if sync:
-                        with open(output_file, "r",) as f:
-                            readlines = f.readlines(1000)
-                            if len(readlines) > 0:
-                                beautiful_print("")
-                                for line in readlines:
-                                    beautiful_print(line.strip(" \n\r\t"), color=LIGHT_BLUE_COLOR)
-                                beautiful_print("")
-                            if f.read(1):
-                                beautiful_print("...")
-                                beautiful_print(f"Open file {output_file} to access complete result")
-                        
-                except Exception as e:
-                    beautiful_print(f"Error executing query: {task_id}/{sub_task_id}", log_only=(not sync), log=log_file, color=RED_COLOR)
-                    stack = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-                    beautiful_print(stack, log_only=(not sync), log=log_file, color=RED_COLOR)
-                    self.tasks[task_id]["status"] = "Failed"
-                    return
-        if commit:
-            connection.get_db().commit()
-        self.tasks[task_id]["status"] = "Success"
+            self.tasks[task_id]["status"] = "Success"
+        except Exception as e:
+            beautiful_print(f"Error executing query: {task_id}", log_only=(not sync), log=log_file, color=RED_COLOR)
+            stack = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+            beautiful_print(stack, log_only=(not sync), log=log_file, color=RED_COLOR)
+            self.tasks[task_id]["status"] = "Failed"
 
     def insert_many(self, identifiers, file_path, table_name, buffer_size, task_id=None, sub_task_id=0, default_connection=None):
         if task_id is None:
@@ -392,8 +394,23 @@ class SQLCMD(cmd.Cmd):
         
         
         beautiful_print("List of existing commands:")
-        beautiful_print(" ".join([s[:-4] for s in os.listdir(path_to_list_command)]), color=LIGHT_BLUE_COLOR)
-        beautiful_print(" ".join([s[:-4] for s in os.listdir(path_to_load_command_workspace)]), color=GREEN_COLOR)
+        def _filter_cmds(filenames):
+            seen, result = set(), []
+            for s in filenames:
+                parts = s.split(".")
+                if len(parts) == 2 and parts[-1] == "sql":
+                    name = parts[0]
+                elif len(parts) == 3 and parts[-1] == "sql" and parts[1] == self.connection_type:
+                    name = parts[0]
+                else:
+                    continue
+                if name not in seen:
+                    seen.add(name)
+                    result.append(name)
+            return result
+
+        beautiful_print(" ".join(_filter_cmds(os.listdir(path_to_list_command))), color=LIGHT_BLUE_COLOR)
+        beautiful_print(" ".join(_filter_cmds(os.listdir(path_to_load_command_workspace))), color=GREEN_COLOR)
         
     def do_runcmd(self, arg):
         """Runs a user command
@@ -407,36 +424,28 @@ class SQLCMD(cmd.Cmd):
         asyn = args[0] == "-a"
         command = args[1] if asyn else args[0]
         
-        os.makedirs(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "commands"
-        ), exist_ok=True)
-        path_to_load_command = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "commands",
-            f"{command}.sql"
-        )
-        
-        os.makedirs(os.path.join(
-            self.workspace_path,
-            "commands"
-        ), exist_ok=True)
-        path_to_load_command_workspace = os.path.join(
-            self.workspace_path,
-            "commands",
-            f"{command}.sql"
-        )
-        
-        found_local = True
-        if not os.path.exists(path_to_load_command_workspace):
-            found_local = False
-            if not os.path.exists(path_to_load_command):
-                beautiful_print("Unknown command. listcmd to get the list of available commands", color=RED_COLOR)
-                return
-            
-        with open(path_to_load_command_workspace if found_local else path_to_load_command,"r") as f:
+        builtin_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "commands")
+        workspace_dir = os.path.join(self.workspace_path, "commands")
+        os.makedirs(builtin_dir, exist_ok=True)
+        os.makedirs(workspace_dir, exist_ok=True)
+
+        specific = f"{command}.{self.connection_type}.sql"
+        generic  = f"{command}.sql"
+        candidates = [
+            os.path.join(workspace_dir, specific),
+            os.path.join(workspace_dir, generic),
+            os.path.join(builtin_dir,   specific),
+            os.path.join(builtin_dir,   generic),
+        ]
+
+        path_to_run = next((p for p in candidates if os.path.exists(p)), None)
+        if path_to_run is None:
+            beautiful_print("Unknown command. listcmd to get the list of available commands", color=RED_COLOR)
+            return
+
+        with open(path_to_run, "r") as f:
             command = f.read()
-            self.start_task(f"runcmd {arg}", self.query_oracle, not asyn, self.oracle_identifiers, [command], False, placeholders=tuple(args[1:]) if len(args) > 1 else None)
+            self.start_task(f"runcmd {arg}", self.query_oracle, not asyn, self.oracle_identifiers, [command], placeholders=tuple(args[1:]) if len(args) > 1 else None)
     
     def do_workspace(self, arg):
         """Switches to specified workspace. No arg = list all workspaces and shows the current one. -c to create new workspace
@@ -557,7 +566,10 @@ class SQLCMD(cmd.Cmd):
             queries[0] = f"EXPLAIN PLAN FOR {queries[0]}"
             queries.append("SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY(NULL, NULL, 'TYPICAL'))")
         
-        self.start_task(f"q {arg}", self.query_oracle, not asyn, self.oracle_identifiers, queries, commit)
+        if commit:
+            queries.append("COMMIT")
+        
+        self.start_task(f"q {arg}", self.query_oracle, not asyn, self.oracle_identifiers, queries)
             
     def do_annotate(self, arg):
         """
@@ -634,21 +646,24 @@ def main():
                 exit(1)
             
             beautiful_print("~~~----~~~")
-            beautiful_print("SQL CLI V0.2.2")
+            beautiful_print("SQL CLI V0.2.3")
             beautiful_print("Author: Liouss")
             beautiful_print("~~~----~~~")
             
-            
-            try:
-                beautiful_print("Opening connection to database...")
-                with connection:
-                    beautiful_print("Connection to database established",color=GREEN_COLOR)
-                    cli = SQLCMD(identifiers, connection, t, pool, database_name)
-                    cli.switch_workspace(last_workspace)
-                    cli.cmdloop()
-            except ConnectionError:
-                beautiful_print("Connection to database refused.", color=RED_COLOR)
-                exit(1)
+            loop = True
+            while loop:
+                try:
+                    beautiful_print("Opening connection to database...")
+                    with connection:
+                        beautiful_print("Connection to database established",color=GREEN_COLOR)
+                        cli = SQLCMD(identifiers, connection, t, pool, database_name)
+                        cli.switch_workspace(last_workspace)
+                        cli.cmdloop()
+                        loop = False
+                except ConnectionError:
+                    beautiful_print("Connection to database refused.", color=RED_COLOR)
+                    beautiful_print("Retrying in 10 seconds...")
+                    time.sleep(10)
             
     finally:
         if cli is not None:
